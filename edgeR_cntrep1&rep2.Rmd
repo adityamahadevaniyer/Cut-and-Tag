@@ -1,0 +1,101 @@
+----
+title: 'DEseq_normalization of H3K4me3 CUT&Tag data done in CAST-KI testicular cells
+  and checking reproducibility between replicates using Pearson Correlation Coefficient '
+author: "Aditya Mahadevan"
+date: "1/27/2021"
+output:
+  html_document: default
+  pdf_document: default
+----
+This is the Rmarkdown document of the analysis carried out to check the reproducibility between H3K4me3 CUT&Tag replicates and also between H3K4me3 Cut&Tag merged and H3K4me3 ChIP merged samples. This data has been generated in CAST-KI testicular cells. 
+#Loading all the required packages for the analysis
+```{r setup, include=FALSE}
+library(tidyverse)
+library(edgeR)
+library(ggpubr)
+```
+#First lets use the peakome file generated for CUT&Tag replicates on CUT&Tag merged MACS e-1 peak dataset
+#Loading the file and then converting into a dataframe to look at the plot before normalization
+```{r cars}
+df <- as.matrix(read.table("CUTnTag_rep1_rep2_peakome.txt", sep = "\t", header = TRUE))
+counts <- subset(df, select = c(6,7))
+class(counts) <- "numeric"
+counts <- as.matrix(counts)
+counts <- as.data.frame(counts)
+counts.log <- log2(counts)
+plot(counts.log$cntrep1, counts.log$cntrep2)
+ggscatter(counts.log, x = "cntrep1", y = "cntrep2", 
+          add = "reg.line", conf.int = TRUE, 
+          cor.coef = TRUE, cor.method = "pearson",
+          xlab = "CUT&Tag replicate 1 before norm", ylab = "CUT&Tag replicate 2 before norm")
+```
+#We usually do this using TMM method implemented in edgeR package in R for normalization. I then plotted the log transformed normalized data in the form of a scatter plot
+
+```{r pressure, echo=FALSE}
+#Run edgeR to normalize the data using TMM
+dge <- DGEList(counts=counts)
+dge.norm <- calcNormFactors(dge, method="TMM") #TMM method for normalization
+dge.norm$samples #to check the normalization factors and library size
+y <- cpm(dge.norm,  normalized.lib.sizes = TRUE) #returns cpm while maintaining library size normalizations
+```
+
+#After having looked at the library size and normalization factors, lets log transform the data and look at the reproducibility
+```{r pressure, echo=FALSE}
+y <- as.data.frame(y) #Converting the list to a dataframe
+y.log <- log2(y + 2) #transforming the data to the log scale for readability
+
+plot(y.log$cntrep1, y.log$cntrep2, xlab = "CUT&Tag replicate 1", ylab = "CUT&Tag replicate 2") #Basic scatter plot
+
+#Calculating Pearson Correlation Coefficient on the normalized data
+pcc <- cor.test(y.log$cntrep1, y.log$cntrep2, method = "pearson")
+
+#Including the PCC and p-value in the scatter plot. 
+ggscatter(y.log, x = "cntrep1", y = "cntrep2", 
+          add = "reg.line", conf.int = TRUE, 
+          cor.coef = TRUE, cor.method = "pearson",
+          xlab = "CUT&Tag replicate 1", ylab = "CUT&Tag replicate 2")
+```
+#I will next use the peakome generated for Merged CUT&Tag and Merged ChIP dataset against CUT&Tag_intersection_peaks (e-1 MACS setting). 
+#Lets load the peakome dataset 
+```{r}
+#Loading the peakome data for the merged CUT&Tag and ChIP files
+df1 <- as.matrix(read.table("CUTnTag_combined_k4me3chip_peakome.txt", sep = "\t", header = TRUE))
+counts.merge <- subset(df1, select = c(6,7)) #Selecting the relevant columns for this analysis
+class(counts.merge) <- "numeric"
+counts.merge <- as.matrix(counts.merge)
+counts.merge <- as.data.frame(counts.merge) #Converting the matrix to a data frame
+```
+
+#Lets look at the reproducibility between Cntmerge and ChIP merged data after log2 transforming the dataset
+```{r}
+counts.merge.log <- log2(counts.merge) #log transforming the data
+plot(counts.merge.log$cntmerge, counts.merge.log$chipmerge) #Basic plot
+#Adding more layers and calculating Pearson Correlation coefficient for the data
+ggscatter(counts.merge.log, x = "cntmerge", y = "chipmerge", 
+          add = "reg.line", conf.int = TRUE, 
+          cor.coef = TRUE, cor.method = "pearson",
+          xlab = "CUT&Tag merge before norm", ylab = "ChIP merge before norm")
+```
+#The PCC value is low suggesting low reproducibility between Cut&Tag merged and ChIP merged samples. Lets try the same thing after normalization
+```{r}
+dge.merge <- DGEList(counts=counts.merge)
+dge.merge.norm <- calcNormFactors(dge.merge, method="TMM") #TMM method for normalization
+dge.merge.norm$samples #to check the normalization factors and library size
+y1 <- cpm(dge.merge.norm,  normalized.lib.sizes = TRUE) #returns cpm while maintaining library size normalizations
+```
+
+
+```{r}
+y1 <- as.data.frame(y1) #Converting the list to a dataframe
+y1.log <- log2(y1 + 2) #transforming the data to the log scale for readability
+#Basic scatter plot
+plot(y1.log$cntmerge, y1.log$chipmerge, xlab = "CUT&Tag merged", ylab = "CUT&Tag merged")
+#Calculating Pearson Correlation Coefficient on the normalized data
+pcc <- cor.test(y1.log$cntmerge, y1.log$chipmerge, method = "pearson")
+ggscatter(y1.log, x = "cntmerge", y = "chipmerge", 
+          add = "reg.line", conf.int = TRUE, 
+          cor.coef = TRUE, cor.method = "pearson",
+          xlab = "CUT&Tag merge", ylab = "H3K4me3 ChIP merge")
+```
+#There is low reproducibility between cnt merge and chip merged samples. It will be best to double-check whether I used the correct set of files for peakome generation. I checked and actually used the correct files for peakome. We will have to discuss more why this is the case!
+

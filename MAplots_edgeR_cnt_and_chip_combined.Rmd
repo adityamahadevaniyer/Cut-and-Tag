@@ -1,0 +1,171 @@
+---
+title: "Cut&Tag_DataExploration"
+author: "Aditya Mahadevan"
+date: "1/30/2021"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+Since we got diff types of distribution of peak overlaps with CUT&Tag and ChIP comparisons, I would like to plot the overlap in a different manner using GRanges and bed intersect tool in R.
+#Load the packages
+```{r setup, include=FALSE}
+library(edgeR)
+library(tidyverse)
+library(GenomicRanges)
+library(ggpubr)
+```
+#Setting up the options
+```{r}
+options(stringsAsFactors = FALSE)
+def.par <- par(no.readonly = T)
+```
+
+#Function to intersect two bedfiles using GRanges
+```{r}
+intersect_bed <- function(x, y){
+  # load into GRanges object
+  a <- makeGRangesFromDataFrame(x, keep.extra.columns = T)
+  b <- makeGRangesFromDataFrame(y, keep.extra.columns = T)
+  # find overlaps
+  my_hit <- findOverlaps(a, b)
+  my_df  <- data.frame(b[subjectHits(my_hit)])
+}
+```
+#Load the data of interest
+```{r}
+x <- read.delim("CUTnTag_merged_k4me3chip_mm10_peakome.txt")
+x <- x %>%
+  mutate(id = paste0("peak",seq.int(nrow(x)))) %>%
+    select(chr, start, end, id, cntmerge, chipmerge)
+
+```
+
+#Perform DE analysis and normalize using edgeR TMM normalization method
+```{r}
+### Asign groups to replicates
+group <- factor(c(1,2))
+y <- DGEList(counts=x[,5:6], group=group)
+### TMM normalization
+y <- calcNormFactors(y)
+y$samples
+```
+
+#Plot the data after log2 transformation and export the data for visualization
+```{r}
+data.cpm <- as.data.frame(cpm(y, normalized.lib.sizes = TRUE))
+data <- round(log2(data.cpm + 1), 4)
+data <- cbind(x[1:4],data) 
+keep <- rowSums(cpm(y)>1) >= 2
+data.filter <- data[keep, ]
+### Visualize batch effects using MDS in edgeR
+#plotMDS(data.filter)
+```
+
+#Use edgeR to calculate differential H3K4me3
+
+#There is no dispersion as there are only one set of samples
+```{r}
+y <- estimateDisp(y) # after calcNormFactors; Dispersion is NA
+
+#y <- estimateTagwiseDisp(y)
+# exact test
+#et <- exactTest(y)
+# export table
+#df <- as.data.frame(data.filter)
+#data.filter$adjP <- p.adjust(df$PValue, method = "BH")
+#df.join <- cbind(x, df)
+## filter peaks with RPM > 1 -- filtering peaks after
+#df.filter <- data.filter[keep, ]
+```
+
+#Filtering the data further (not required for this analysis)
+```{r}
+#nrow(df.filter %>% filter(logFC > 1 & adjP < .01)) #73
+#nrow(df.filter %>% filter(logFC < -1 & adjP < .01)) #11812
+```
+
+#Defining the CAST hotspots
+```{r}
+# CAST hotspots defined by unique H3K4me3 sites
+unique <- "E_binding_sites_R.mm10.bed"
+# get hotspot annotations
+unique <- read.delim((unique), header = F)
+names(unique) <- c('chr', 'start', 'end', 'peak', 'score', 'strand')
+```
+
+#Defining the TSS (Gencode)
+```{r}
+# promoter annotation using ChromHMM state 1
+tss <- "mm10_gencode_tss_unique.bed"
+# get TSS annotations
+tss <- read.delim((tss), header = F)
+names(tss) <- c('chr', 'start', 'end')
+```
+
+## Intersect data with CAST hotspots
+```{r}
+df.b6 <- intersect_bed(unique, data.filter) %>% distinct(id, .keep_all = T)
+df.notb6 <- subset(data.filter, !(id %in% df.b6$id))
+#df.b6 <- subset(df.b6, !(start %in% df.fp$id))
+```
+
+#Intersect the data similarly for TSS
+```{r}
+df.tss <- intersect_bed(tss, data.filter) %>% distinct(id, .keep_all = T)
+df.nottss <- subset(data.filter, !(id %in% df.tss$id))
+#df.tss.f <- subset(df.tss, !(id %in% state1.hotspots$id))
+```
+
+#Making the MA plot for CAST hotspots
+```{r}
+#png("MA_plot_cntmerge_chipmerge_at_CASThotspots.png", width=6, height=6, units="in", res=600)
+plot(df.notb6$cnt ~ df.notb6$chip,
+     type = "n",
+     #ylim=c(-6,6), xlim=c(-1,10), 
+     ann = T)
+grid (NULL,NULL, lty = 3, col = "lightgrey")
+points(df.notb6$cnt ~ df.notb6$chip, 
+       pch=20, 
+       col=rgb(0,0,0,0.25))
+points(df.b6$cnt ~ df.b6$chip, 
+       pch=20, 
+       col=rgb(40/250,170/250,250/250,0.25))
+pcc.cast <- cor.test(df.notb6$cnt, df.notb6$chip, method = "pearson")
+#abline(h = 1, col = "red")
+#abline(h = -1, col = "red")
+#dev.off()
+```
+
+#Making the MA plot for TSS
+```{r}
+#png("./MA_plot_cntmerge_chipmerge_at_TSS", width=6, height=6, units="in", res=600)
+plot(df.nottss$cnt ~ df.nottss$chip,
+     type = "n",
+     #ylim=c(-6,6), xlim=c(-1,10), 
+     ann = T)
+grid (NULL,NULL, lty = 3, col = "lightgrey")
+points(df.nottss$cnt ~ df.nottss$chip, 
+       pch=20, 
+       col=rgb(0,0,0,0.25))
+points(df.tss$cnt ~ df.tss$chip, 
+       pch=20, 
+       col=rgb(40/250,170/250,250/250,0.25))
+pcc_tss <- cor.test(df.nottss$cnt, df.nottss$chip, method = "pearson")
+#dev.off()
+```
+
+
+```{r}
+ggscatter(df.b6, x = "chipmerge", y = "cntmerge", 
+          add = "reg.line", conf.int = TRUE, 
+          cor.coef = TRUE, cor.method = "pearson",
+          xlab = "CUT&Tag at hotspots", ylab = "ChIP at hotspots")
+```
+
+
+```{r}
+ggscatter(df.tss, x = "chipmerge", y = "cntmerge", 
+          add = "reg.line", conf.int = TRUE, 
+          cor.coef = TRUE, cor.method = "pearson",
+          xlab = "CUT&Tag at TSS", ylab = "ChIP at TSS")
+```
